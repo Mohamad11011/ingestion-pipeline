@@ -30,5 +30,10 @@ AUTOTHROTTLE_MAX_DELAY = 30.0
 DOWNLOAD_TIMEOUT = 30
 LOG_LEVEL = "INFO"
 
-ITEM_PIPELINES: dict[str, int] = {}
-DOWNLOADER_MIDDLEWARES: dict[str, int] = {}
+ITEM_PIPELINES: dict[str, int] = {
+    "workplace_scraper.pipelines.LandingPipeline": 300,
+}
+DOWNLOADER_MIDDLEWARES: dict[str, int] = {
+    # Before RetryMiddleware (550) so throttling is logged before the retry decision.
+    "workplace_scraper.middlewares.RateLimitLoggerMiddleware": 543,
+}

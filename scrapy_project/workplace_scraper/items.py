@@ -2,12 +2,10 @@ from scrapy import Field, Item
 
 
 class WorkplaceItem(Item):
-    identifier = Field()
-    title = Field()
-    description = Field()
-    date = Field()
-    document_url = Field()
-    partition_date = Field()
-    body = Field()
-    source_url = Field()
-    document_type = Field()
+    """Carries one scraped record into the landing pipeline; maps into LandingMetadata."""
+
+    record = Field()
+    payload = Field()
+    content_type = Field()
+    existing = Field()
+    scope_key = Field()

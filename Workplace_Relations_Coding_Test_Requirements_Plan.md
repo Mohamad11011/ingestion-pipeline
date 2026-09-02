@@ -13,15 +13,15 @@ Last updated: 2026-09-02. Repo root is `ingestion-pipeline` (not a nested `workp
 | 0 Source recon | **DONE** | GET listing contract proven. Documented in Phase 0. |
 | 1 Infrastructure | **DONE** | `docker-compose.yml` — Mongo + MinIO healthy; `minio-init` created `landing` and `transformed`. |
 | 2 Core utilities | **DONE** | Config, date partitioner, SHA-256, metadata identity, storage ports, Mongo repository, MinIO client, structured JSON logging. |
-| 3 Scraper | **NOT STARTED** | Scrapy project exists; `workplace` spider is a stub (`start_requests` empty). |
-| 4 Idempotency | NOT STARTED | |
-| 5 Transformation | NOT STARTED | |
+| 3 Scraper | **DONE** | `src/scraping/{bodies,listing,ingest}.py` + spider/items/pipelines/middlewares. Runtime body discovery, pagination, JSON logs. Live: 45 Labour Court records for 2024-01. |
+| 4 Idempotency | **DONE** | Re-run of the same range wrote 0 objects and created 0 duplicates. Source sends no ETag/Last-Modified, so SHA-256 comparison is the operative guard. |
+| 5 Transformation | **DONE** | `transformation/html.py` (BeautifulSoup, `div.content` proven on a real saved page) + `transformer.py` (streamed partition range, `identifier.ext`, transformed bucket/collection) + CLI. |
 | 6 Orchestration | NOT STARTED | `orchestration/dagster/` placeholder only. |
-| 7 Tests | **PARTIAL** | 20 tests passing (`partitioning`, `hashing`, `settings`, `metadata`, `storage`, `logging`). Storage tests run against live Mongo/MinIO and skip when unreachable. HTML/idempotency tests not written. |
+| 7 Tests | **PARTIAL** | 63 tests passing. Remaining gap is Phase 6 orchestration coverage. |
 | 8 Documentation | **PARTIAL** | Short README + `.env.example`. `ARCHITECTURE.md` not written. |
 | 9 End-to-end | NOT STARTED | |
 
-**Next:** Phase 3 spider from the Phase 0 contract, wiring pipelines to `MongoRepository`, `S3ObjectStorage`, and `RunStats`.
+**Next:** Phase 6 (Dagster assets calling `transform_range` + the spider), then Phase 8 `ARCHITECTURE.md` and Phase 9 end-to-end.
 
 ## 1. What You Are Building
 
@@ -96,14 +96,14 @@ If two bodies share the same identifier, landing keys stay unique; transformed k
 ## 2.1 Scrapy
 
 - [x] Use the Scrapy framework.
-- [ ] Implement one or more Scrapy spiders.
-- [ ] Use proper Scrapy settings, pipelines, items/models, and middleware where appropriate.
-- [ ] Optimize for fast scraping without getting blocked.
-- [ ] Configure concurrency, delays, retries, and throttling appropriately.
-- [ ] Avoid unnecessary requests.
-- [ ] Handle pagination for every body × partition listing.
-- [ ] Send an identifying User-Agent and respect robots.txt / HTTP 429 (required to avoid getting blocked, not an extra product feature).
-- [ ] Before writing the spider, reproduce one body × one month search from Scrapy shell (or equivalent HTTP replay). Keep using Scrapy.
+- [x] Implement one or more Scrapy spiders.
+- [x] Use proper Scrapy settings, pipelines, items/models, and middleware where appropriate.
+- [x] Optimize for fast scraping without getting blocked.
+- [x] Configure concurrency, delays, retries, and throttling appropriately.
+- [x] Avoid unnecessary requests.
+- [x] Handle pagination for every body × partition listing.
+- [x] Send an identifying User-Agent and respect robots.txt / HTTP 429 (required to avoid getting blocked, not an extra product feature).
+- [x] Before writing the spider, reproduce one body × one month search from Scrapy shell (or equivalent HTTP replay). Keep using Scrapy.
 
 Pipelines must delegate persistence to shared storage/hash modules (single responsibility). Do not put Mongo and MinIO logic only inside `pipelines.py`.
 
@@ -111,11 +111,11 @@ Pipelines must delegate persistence to shared storage/hash modules (single respo
 
 The scraper must:
 
-- [ ] Scrape each body listed on the left side of the Workplace Relations website.
-- [ ] Iterate through every body.
-- [ ] Apply date filtering to each body.
-- [ ] Store the body associated with each record.
-- [ ] Handle listing pagination per body × partition.
+- [x] Scrape each body listed on the left side of the Workplace Relations website.
+- [x] Iterate through every body.
+- [x] Apply date filtering to each body.
+- [x] Store the body associated with each record.
+- [x] Handle listing pagination per body × partition.
 
 Discover bodies from the live site body filter (left-side list / checkboxes). Bind the spider to those body values, not to a screenshot of the layout.
 
@@ -177,12 +177,12 @@ Example monthly partitioning:
 
 Requirements:
 
-- [ ] Accept start date.
-- [ ] Accept end date.
+- [x] Accept start date.
+- [x] Accept end date.
 - [x] Generate date partitions.
 - [x] Make partition size configurable.
-- [ ] Apply the partitions to each body.
-- [ ] Add `partition_date` to every record.
+- [x] Apply the partitions to each body.
+- [x] Add `partition_date` to every record.
 
 Empty partitions (zero listing hits) are valid: log counts of 0 and continue. They are not run failures.
 
@@ -252,9 +252,9 @@ Requirements:
 - [x] MongoDB.
 - [x] Run MongoDB in Docker.
 - [x] Create a landing metadata collection.
-- [ ] Store all scraped metadata.
-- [ ] Store file path.
-- [ ] Store file hash.
+- [x] Store all scraped metadata.
+- [x] Store file path.
+- [x] Store file hash.
 - [x] Add appropriate indexes.
 - [x] Unique index on `body` + `identifier`.
 - [x] Support idempotent/upsert behavior.
@@ -287,8 +287,8 @@ Requirements:
 
 - [x] Object storage runs in Docker.
 - [x] Create a Landing Zone.
-- [ ] Store downloaded documents in Landing Zone.
-- [ ] Keep Landing Zone immutable during transformation.
+- [x] Store downloaded documents in Landing Zone.
+- [x] Keep Landing Zone immutable during transformation.
 
 ---
 
@@ -298,22 +298,26 @@ Requirements:
 
 If a record links directly to a PDF or document:
 
-- [ ] Download it.
-- [ ] Store it in Landing Zone.
-- [ ] Preserve the document as-is.
-- [ ] Calculate its file hash.
-- [ ] Store its path in MongoDB.
-- [ ] Store its hash in MongoDB.
+- [x] Download it.
+- [x] Store it in Landing Zone.
+- [x] Preserve the document as-is.
+- [x] Calculate its file hash.
+- [x] Store its path in MongoDB.
+- [x] Store its hash in MongoDB.
+
+The PDF/DOC/DOCX branch is implemented (magic-byte type detection, bytes stored verbatim,
+no normalization) and unit-tested, but **not exercised against the live source**: every
+listing hit encountered so far resolves to an HTML decision page.
 
 ## HTML
 
 If a record links to an HTML page:
 
-- [ ] Navigate to the page.
-- [ ] Scrape the relevant page content.
-- [ ] Store the resulting page as `.html`.
-- [ ] Store its path in MongoDB.
-- [ ] Calculate and store its hash.
+- [x] Navigate to the page.
+- [x] Scrape the relevant page content.
+- [x] Store the resulting page as `.html`.
+- [x] Store its path in MongoDB.
+- [x] Calculate and store its hash.
 
 Landing HTML is the fetched decision page stored as `.html` (company rule). Transformation still removes remaining website UI (company rule). Landing is not the cleaned file; the transformed object is.
 
@@ -386,10 +390,10 @@ Requirements:
 - [x] Define deterministic record identity.
 - [x] Use MongoDB unique indexes where appropriate.
 - [x] Use upsert logic.
-- [ ] Compare file hashes.
-- [ ] Do not re-download unchanged files.
-- [ ] Detect changed files.
-- [ ] Update metadata appropriately when a source file changes.
+- [x] Compare file hashes.
+- [x] Do not re-download unchanged files.
+- [x] Detect changed files.
+- [x] Update metadata appropriately when a source file changes.
 
 Identity (locked):
 
@@ -468,13 +472,13 @@ Include:
 Requirements:
 
 - [x] JSON logs.
-- [ ] Current partition.
-- [ ] Current body.
-- [ ] Number of records found.
-- [ ] Number successfully scraped.
-- [ ] Failed download URLs.
-- [ ] Error codes/reasons.
-- [ ] End-of-run summary.
+- [x] Current partition.
+- [x] Current body.
+- [x] Number of records found.
+- [x] Number successfully scraped.
+- [x] Failed download URLs.
+- [x] Error codes/reasons.
+- [x] End-of-run summary.
 
 ---
 
@@ -640,13 +644,13 @@ Iterate those files (do not list the whole bucket)
 
 Requirements:
 
-- [ ] Accept start date.
-- [ ] Accept end date.
-- [ ] Fetch metadata from MongoDB.
-- [ ] Fetch referenced files from object storage.
-- [ ] Iterate through the files.
-- [ ] Determine file type.
-- [ ] Apply the correct transformation behavior.
+- [x] Accept start date.
+- [x] Accept end date.
+- [x] Fetch metadata from MongoDB.
+- [x] Fetch referenced files from object storage.
+- [x] Iterate through the files.
+- [x] Determine file type.
+- [x] Apply the correct transformation behavior.
 
 Filter transformation by `partition_date` using the same half-open range as the scraper. Do not load the entire landing collection into memory.
 
@@ -662,12 +666,12 @@ DO NOT TRANSFORM CONTENT
 
 Requirements:
 
-- [ ] Leave PDF unchanged.
-- [ ] Leave DOC unchanged.
-- [ ] Leave DOCX unchanged.
-- [ ] Copy/store the file in transformed object storage.
-- [ ] Rename it to `identifier.ext`.
-- [ ] Calculate/store the transformed file hash.
+- [x] Leave PDF unchanged.
+- [x] Leave DOC unchanged.
+- [x] Leave DOCX unchanged.
+- [x] Copy/store the file in transformed object storage.
+- [x] Rename it to `identifier.ext`.
+- [x] Calculate/store the transformed file hash.
 
 ---
 
@@ -700,16 +704,16 @@ other irrelevant website elements
 
 Requirements:
 
-- [ ] Parse HTML.
-- [ ] Identify relevant document content.
-- [ ] Remove navigation.
-- [ ] Remove buttons.
-- [ ] Remove headers where they are website UI rather than document content.
-- [ ] Remove footers.
-- [ ] Remove other irrelevant UI.
-- [ ] Preserve relevant document content.
-- [ ] Produce cleaned `.html`.
-- [ ] Calculate the new file hash.
+- [x] Parse HTML.
+- [x] Identify relevant document content.
+- [x] Remove navigation.
+- [x] Remove buttons.
+- [x] Remove headers where they are website UI rather than document content.
+- [x] Remove footers.
+- [x] Remove other irrelevant UI.
+- [x] Preserve relevant document content.
+- [x] Produce cleaned `.html`.
+- [x] Calculate the new file hash.
 
 ---
 
@@ -733,11 +737,11 @@ ABC125.html
 
 Requirements:
 
-- [ ] Rename PDFs.
-- [ ] Rename DOC/DOCX.
-- [ ] Rename HTML.
-- [ ] Use the identifier from metadata.
-- [ ] Preserve the correct extension.
+- [x] Rename PDFs.
+- [x] Rename DOC/DOCX.
+- [x] Rename HTML.
+- [x] Use the identifier from metadata.
+- [x] Preserve the correct extension.
 
 ---
 
@@ -759,10 +763,10 @@ S3_TRANSFORMED_BUCKET
 
 Requirements:
 
-- [ ] New transformed storage container/bucket.
-- [ ] Store all transformed documents there.
-- [ ] Never modify Landing Zone files.
-- [ ] Never delete Landing Zone files.
+- [x] New transformed storage container/bucket.
+- [x] Store all transformed documents there.
+- [x] Never modify Landing Zone files.
+- [x] Never delete Landing Zone files.
 
 Those last two apply to the transformation job. The scraper may upsert landing objects on a changed source file.
 
@@ -803,11 +807,11 @@ Upsert transformed Mongo on the same identity (`body` + `identifier`). Do not wr
 
 Requirements:
 
-- [ ] New MongoDB collection.
-- [ ] Preserve metadata.
-- [ ] Store new file path.
-- [ ] Store new file hash.
-- [ ] Do not modify landing metadata unnecessarily.
+- [x] New MongoDB collection.
+- [x] Preserve metadata.
+- [x] Store new file path.
+- [x] Store new file hash.
+- [x] Do not modify landing metadata unnecessarily.
 
 ---
 
@@ -1046,10 +1050,10 @@ Transformed Zone
 
 Transformation must never:
 
-- [ ] Delete landing files.
-- [ ] Modify landing files.
-- [ ] Transform files in-place.
-- [ ] Overwrite raw data.
+- [x] Delete landing files.
+- [x] Modify landing files.
+- [x] Transform files in-place.
+- [x] Overwrite raw data.
 
 Scraper re-runs may upsert landing objects when the source file hash changes. That is ingestion idempotency, not transformation.
 
@@ -1336,7 +1340,7 @@ Phase 5. `S3ObjectStorage` is path-style S3v4 (MinIO). `structured.py` provides 
 formatter, `log_failure(url, error_code, reason)`, and `RunStats`/`ScopeStats` so that
 `records_found == records_scraped + failed` per body x partition and per run.
 
-## Phase 3 — Scraper — NOT STARTED (stub only)
+## Phase 3 — Scraper — DONE
 
 Implement:
 
@@ -1356,7 +1360,7 @@ Hash files
 Mongo + Landing Storage
 ```
 
-## Phase 4 — Idempotency
+## Phase 4 — Idempotency — DONE
 
 Test:
 
@@ -1370,7 +1374,27 @@ Run #2
   -> changed files detected
 ```
 
-## Phase 5 — Transformation
+Measured (Labour Court, 2024-01-29 -> 2024-02-01):
+
+| Run | found/scraped/failed | objects written | unchanged by hash | Mongo |
+|---|---|---|---|---|
+| 1 | 8 / 8 / 0 | 8 | 0 | 8 inserted |
+| 2 (same range) | 8 / 8 / 0 | **0** | **8** | 8 docs, 0 duplicates |
+| 3 (full month) | 45 / 45 / 0 | 37 | 8 | 45 docs, 5 pages paginated |
+
+Two source facts constrain this (both to go in `ARCHITECTURE.md`):
+
+1. Decision pages send **no `ETag` and no `Last-Modified`**. Conditional GET is implemented,
+   stored and unit-tested, but never fires against this source, so steps 2-3 of section 8 are
+   inert here and the SHA-256 comparison is what prevents the re-put. `Content-Length`
+   disagrees with the real body length by 1 byte and is deliberately not used as a validator.
+2. Pages carry a volatile `<!-- Elapsed time: ... -->` render comment - the only byte that
+   differs between two fetches of the same decision. It is normalized out of HTML payloads
+   *before* storing and hashing (11 bytes on a sample page), so `file_hash` remains the hash
+   of the exact stored bytes. Without this, run #2 rewrites every object. This is the only
+   content change the landing zone performs and it applies to HTML only.
+
+## Phase 5 — Transformation — DONE
 
 Implement:
 
@@ -1396,6 +1420,12 @@ new Mongo collection
 ```
 
 Confirm landing bytes unchanged after this phase.
+
+Verified: landing objects (bytes + ETag + LastModified) and landing Mongo documents
+were byte-identical before and after a transform run. `transformer.py` has no landing
+write path at all — it only calls `storage.get(landing_bucket, ...)` and `upsert_transformed`.
+CLI: `PYTHONPATH=src python -m transformation.transformer --start-date ... --end-date ...`
+(`--end-date` exclusive). `transform_range(start, end)` is the callable for Dagster in Phase 6.
 
 ## Phase 6 — Orchestration
 
@@ -1448,33 +1478,33 @@ Verify:
 ## Scraping
 
 - [x] Scrapy used.
-- [ ] All bodies scraped.
-- [ ] Start date accepted.
-- [ ] End date accepted.
-- [ ] Date range partitioned.
-- [ ] Partition size configurable.
-- [ ] `partition_date` stored.
-- [ ] Fast scraping strategy.
-- [ ] Rate limiting.
-- [ ] Retry handling.
-- [ ] Pagination handled.
-- [ ] Metadata extracted.
-- [ ] PDF downloaded.
-- [ ] DOC/DOCX downloaded.
-- [ ] HTML pages followed.
-- [ ] HTML stored as `.html`.
+- [x] All bodies scraped.
+- [x] Start date accepted.
+- [x] End date accepted.
+- [x] Date range partitioned.
+- [x] Partition size configurable.
+- [x] `partition_date` stored.
+- [x] Fast scraping strategy.
+- [x] Rate limiting.
+- [x] Retry handling.
+- [x] Pagination handled.
+- [x] Metadata extracted.
+- [x] PDF downloaded.
+- [x] DOC/DOCX downloaded.
+- [x] HTML pages followed.
+- [x] HTML stored as `.html`.
 
 ## Metadata
 
-- [ ] Title.
-- [ ] Description.
-- [ ] Identifier.
-- [ ] Date.
-- [ ] Document URL.
-- [ ] Body.
-- [ ] Partition date.
-- [ ] File path.
-- [ ] File hash.
+- [x] Title.
+- [x] Description.
+- [x] Identifier.
+- [x] Date.
+- [x] Document URL.
+- [x] Body.
+- [x] Partition date.
+- [x] File path.
+- [x] File hash.
 
 ## Landing Infrastructure
 
@@ -1489,22 +1519,22 @@ Verify:
 
 - [x] Unique record identity.
 - [x] Mongo unique/index strategy.
-- [ ] Existing records detected.
-- [ ] File hash compared.
-- [ ] Unchanged files not re-downloaded.
-- [ ] No duplicate records.
+- [x] Existing records detected.
+- [x] File hash compared.
+- [x] Unchanged files not re-downloaded.
+- [x] No duplicate records.
 
 ## Logging
 
-- [ ] JSON logs.
-- [ ] Partition logged.
-- [ ] Body logged.
-- [ ] Records found.
-- [ ] Records successfully scraped.
-- [ ] Failed downloads.
-- [ ] Failed URL.
-- [ ] Error code/reason.
-- [ ] End-of-run summary.
+- [x] JSON logs.
+- [x] Partition logged.
+- [x] Body logged.
+- [x] Records found.
+- [x] Records successfully scraped.
+- [x] Failed downloads.
+- [x] Failed URL.
+- [x] Error code/reason.
+- [x] End-of-run summary.
 
 ## Orchestration
 
@@ -1516,27 +1546,27 @@ Verify:
 
 ## Transformation
 
-- [ ] Start date.
-- [ ] End date.
-- [ ] Fetch metadata from Mongo.
-- [ ] Fetch files from object storage.
-- [ ] Iterate through files.
-- [ ] PDF unchanged.
-- [ ] DOC unchanged.
-- [ ] DOCX unchanged.
-- [ ] HTML parsed.
-- [ ] Navigation removed.
-- [ ] Buttons removed.
-- [ ] Headers handled.
-- [ ] Footers removed.
-- [ ] Relevant content retained.
-- [ ] New hash calculated.
-- [ ] ALL files renamed to `identifier.ext`.
-- [ ] New object storage container/bucket.
-- [ ] New Mongo collection.
-- [ ] New file path stored.
-- [ ] New file hash stored.
-- [ ] Landing Zone untouched.
+- [x] Start date.
+- [x] End date.
+- [x] Fetch metadata from Mongo.
+- [x] Fetch files from object storage.
+- [x] Iterate through files.
+- [x] PDF unchanged.
+- [x] DOC unchanged.
+- [x] DOCX unchanged.
+- [x] HTML parsed.
+- [x] Navigation removed.
+- [x] Buttons removed.
+- [x] Headers handled.
+- [x] Footers removed.
+- [x] Relevant content retained.
+- [x] New hash calculated.
+- [x] ALL files renamed to `identifier.ext`.
+- [x] New object storage container/bucket.
+- [x] New Mongo collection.
+- [x] New file path stored.
+- [x] New file hash stored.
+- [x] Landing Zone untouched.
 
 ## Deliverables
 
@@ -1548,7 +1578,7 @@ Verify:
 - [x] Tests.
 - [ ] Clean code.
 - [ ] Python best practices.
-- [ ] Robust error handling.
+- [x] Robust error handling.
 
 ---
 
