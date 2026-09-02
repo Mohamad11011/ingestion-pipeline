@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class ObjectStorage(Protocol):
+    def put(self, bucket: str, key: str, body: bytes, content_type: str) -> None: ...
+
+    def get(self, bucket: str, key: str) -> bytes: ...
+
+    def exists(self, bucket: str, key: str) -> bool: ...
+
+
+class MetadataStore(Protocol):
+    def find_landing(self, body: str, identifier: str) -> dict | None: ...
+
+    def upsert_landing(self, record: dict) -> bool: ...
+
+    def upsert_transformed(self, record: dict) -> bool: ...
