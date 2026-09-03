@@ -91,7 +91,8 @@ def test_partition_range_is_half_open(repo: MongoRepository) -> None:
     ]:
         repo.upsert_landing(_record(identifier, partition))
 
-    found = [doc["identifier"] for doc in repo.iter_landing_by_partition_range("2024-01-01", "2024-03-01")]
+    streamed = repo.iter_landing_by_partition_range("2024-01-01", "2024-03-01")
+    found = [doc["identifier"] for doc in streamed]
 
     assert found == ["ADJ-2", "ADJ-3"]
 

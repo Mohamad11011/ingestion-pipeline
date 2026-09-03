@@ -160,7 +160,8 @@ def test_landing_metadata_is_preserved_in_transformed_record(settings) -> None:
     pipeline.run(date(2024, 2, 1), date(2024, 3, 1))
 
     transformed = repository.transformed[0]
-    for field in ("title", "description", "date", "body", "source_url", "document_url", "partition_date"):
+    preserved = ("title", "description", "date", "body", "source_url", "document_url")
+    for field in (*preserved, "partition_date"):
         assert transformed[field] == records[0][field]
 
 

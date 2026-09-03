@@ -79,7 +79,8 @@ def test_empty_partition_is_not_a_failure() -> None:
     logger, stream = _capture("test.empty")
     stats = RunStats()
 
-    stats.close_scope(logger, stats.scope(body="Equality Tribunal", partition="2024-05-01/2024-06-01"))
+    scope = stats.scope(body="Equality Tribunal", partition="2024-05-01/2024-06-01")
+    stats.close_scope(logger, scope)
 
     record = _lines(stream)[0]
     assert record["records_found"] == 0

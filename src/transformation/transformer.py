@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from config.settings import Settings, get_settings
 from hashing.files import sha256_bytes
@@ -95,7 +95,7 @@ class TransformationPipeline:
                 "file_path": key,
                 "file_hash": file_hash,
                 "source_file_path": source_key,
-                "transformed_at": datetime.now(timezone.utc).isoformat(),
+                "transformed_at": datetime.now(UTC).isoformat(),
             }
         )
         log_event(
@@ -146,7 +146,9 @@ def transform_range(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Transform landing documents into the transformed zone.")
+    parser = argparse.ArgumentParser(
+        description="Transform landing documents into the transformed zone."
+    )
     parser.add_argument("--start-date", required=True, type=date.fromisoformat)
     parser.add_argument("--end-date", required=True, type=date.fromisoformat, help="exclusive")
     parser.add_argument("--log-level", default="INFO")

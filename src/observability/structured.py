@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TextIO
 
 _FIELDS_KEY = "_fields"
@@ -19,7 +19,7 @@ _RESERVED = set(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) | {
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "event": record.getMessage(),

@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hashing.files import sha256_bytes
 from models.documents import DOC, DOCX, HTML, PDF, detect_document_type, landing_key
 from models.metadata import LandingMetadata
 from storage.ports import MetadataStore, ObjectStorage
 
-# The site stamps its own render time into every page; without this the bytes (and so the
-# hash) differ on every fetch and no document would ever look unchanged.
-_RENDER_TIME_COMMENT = re.compile(rb"<!--\s*Elapsed time:[^>]*-->")
+# The site stamps per-request render telemetry into every page: an elapsed-time comment, plus a
+# cache-state comment that is present or absent depending on whether the server served the page
+# from its own cache. Without normalizing both, the bytes (and so the hash) differ between fetches
+# and no document would ever look unchanged.
+_RENDER_COMMENTS = (
+    (re.compile(rb"<!--\s*Elapsed time:[^>]*-->"), b"<!-- Elapsed time -->"),
+    (re.compile(rb"<!--\s*cached or not being index\.aspx page\s*-->"), b""),
+)
 
 _CONTENT_TYPES = {
     HTML: "text/html; charset=utf-8",
@@ -46,7 +51,9 @@ def normalize_payload(payload: bytes, document_type: str) -> bytes:
     """Drop volatile server render telemetry so an unchanged page hashes the same twice."""
     if document_type != HTML:
         return payload
-    return _RENDER_TIME_COMMENT.sub(b"<!-- Elapsed time -->", payload)
+    for pattern, replacement in _RENDER_COMMENTS:
+        payload = pattern.sub(replacement, payload)
+    return payload
 
 
 class LandingIngestor:
@@ -85,7 +92,7 @@ class LandingIngestor:
             document_type=document_type,
             file_path=file_path,
             file_hash=file_hash,
-            scraped_at=datetime.now(timezone.utc).isoformat(),
+            scraped_at=datetime.now(UTC).isoformat(),
         )
         inserted = self._repository.upsert_landing(metadata.model_dump())
         return IngestResult(

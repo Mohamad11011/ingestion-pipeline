@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     s3_transformed_bucket: str
     s3_region: str = "us-east-1"
     partition_size: str = "monthly"
+    # First partition the orchestrator knows about; Dagster needs a static start date.
+    pipeline_start_date: date = date(2024, 1, 1)
     scrape_concurrency: int = 8
     scrape_delay: float = 1.0
     scrape_retry_times: int = 3

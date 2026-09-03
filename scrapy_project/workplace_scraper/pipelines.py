@@ -53,8 +53,12 @@ class LandingPipeline:
 
         spider.mark_scraped(scope_key)
         stats = spider.crawler.stats
-        stats.inc_value("landing/objects_written" if result.object_written else "landing/unchanged_hash")
-        stats.inc_value("landing/records_inserted" if result.inserted else "landing/records_updated")
+        stats.inc_value(
+            "landing/objects_written" if result.object_written else "landing/unchanged_hash"
+        )
+        stats.inc_value(
+            "landing/records_inserted" if result.inserted else "landing/records_updated"
+        )
         log_event(
             logger,
             "record_stored",

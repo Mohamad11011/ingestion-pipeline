@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -122,10 +123,8 @@ def _run(ingestor: LandingIngestor, source: FakeSource, html: bytes) -> Workplac
         if request.callback != spider.parse_document:
             continue
         for item in spider.parse_document(source.fetch(request)):
-            try:
+            with contextlib.suppress(DropItem):
                 pipeline.process_item(item, spider)
-            except DropItem:
-                pass
     return spider
 
 
@@ -199,7 +198,8 @@ def test_changed_source_bytes_update_landing_object_and_metadata(
 
     stored = _repository(ingestor).documents[(BODY, "LCR22912")]
     assert stored["file_hash"] == sha256_bytes(b"<html>revised decision</html>")
-    assert _storage(ingestor).objects[(BUCKET, stored["file_path"])] == b"<html>revised decision</html>"
+    objects = _storage(ingestor).objects
+    assert objects[(BUCKET, stored["file_path"])] == b"<html>revised decision</html>"
     assert len(_storage(ingestor).puts) == 11
     assert second.crawler.stats.values["landing/objects_written"] == 1
     assert len(_repository(ingestor).documents) == 10
@@ -226,7 +226,8 @@ def test_stored_validator_skips_the_download(
 def test_conditional_headers_are_empty_without_stored_validators() -> None:
     assert conditional_headers(None) == {}
     assert conditional_headers({"file_hash": "abc"}) == {}
-    assert conditional_headers({"http_etag": 'W/"v1"', "http_last_modified": "Mon, 01 Jan 2024"}) == {
+    stored = {"http_etag": 'W/"v1"', "http_last_modified": "Mon, 01 Jan 2024"}
+    assert conditional_headers(stored) == {
         "If-None-Match": 'W/"v1"',
         "If-Modified-Since": "Mon, 01 Jan 2024",
     }
@@ -283,7 +284,34 @@ def test_repeated_runs_against_mongo_keep_one_document(
     assert len(_storage(mongo_ingestor).puts) == 11
 
 
-def test_render_time_comment_does_not_look_like_a_change(ingestor: LandingIngestor) -> None:
+RENDER_TELEMETRY = pytest.mark.parametrize(
+    ("first_payload", "second_payload"),
+    [
+        pytest.param(
+            b"<html>x</html><!-- Elapsed time: 0 -->",
+            b"<html>x</html><!-- Elapsed time: 0.140607 -->",
+            id="elapsed_time_changes",
+        ),
+        pytest.param(
+            b"<html>x</html><!-- cached or not being index.aspx page --><!-- Elapsed time: 0 -->",
+            b"<html>x</html><!-- Elapsed time: 0 -->",
+            id="cache_state_comment_disappears",
+        ),
+        pytest.param(
+            b"<html>x</html><!-- Elapsed time: 0 -->",
+            b"<html>x</html><!-- cached or not being index.aspx page --><!-- Elapsed time: 0.4 -->",
+            id="cache_state_comment_appears",
+        ),
+    ],
+)
+
+
+@RENDER_TELEMETRY
+def test_render_telemetry_does_not_look_like_a_change(
+    ingestor: LandingIngestor,
+    first_payload: bytes,
+    second_payload: bytes,
+) -> None:
     record = {
         "identifier": "LCR22912",
         "title": "LCR22912",
@@ -294,12 +322,10 @@ def test_render_time_comment_does_not_look_like_a_change(ingestor: LandingIngest
         "partition_date": "2024-01-01",
         "body": BODY,
     }
-    first = ingestor.ingest(record, b"<html>x</html><!-- Elapsed time: 0 -->", "text/html")
+    first = ingestor.ingest(record, first_payload, "text/html")
     existing = _repository(ingestor).find_landing(BODY, "LCR22912")
 
-    second = ingestor.ingest(
-        record, b"<html>x</html><!-- Elapsed time: 0.140607 -->", "text/html", existing
-    )
+    second = ingestor.ingest(record, second_payload, "text/html", existing)
 
     assert second.file_hash == first.file_hash
     assert second.object_written is False

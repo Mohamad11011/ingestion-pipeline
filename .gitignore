@@ -16,3 +16,4 @@ build/
 .DS_Store
 data/mongo/
 data/minio/
+docs/

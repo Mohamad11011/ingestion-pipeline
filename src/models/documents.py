@@ -47,7 +47,10 @@ def detect_document_type(content_type: str | None, payload: bytes) -> str:
 
 
 def landing_key(body: str, identifier: str, document_type: str) -> str:
-    return f"{sanitize_identifier(body)}/{sanitize_identifier(identifier)}{extension_for(document_type)}"
+    return (
+        f"{sanitize_identifier(body)}/"
+        f"{sanitize_identifier(identifier)}{extension_for(document_type)}"
+    )
 
 
 def transformed_key(identifier: str, document_type: str) -> str:
