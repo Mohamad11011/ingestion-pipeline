@@ -63,6 +63,8 @@ def summary_from_lines(lines: Iterator[str]) -> ScrapeSummary:
             payload = json.loads(line)
         except (TypeError, ValueError):
             continue
+        if not isinstance(payload, dict):
+            continue
         if payload.get("event") == "run_summary":
             found = int(payload.get("records_found", 0))
             scraped = int(payload.get("records_scraped", 0))

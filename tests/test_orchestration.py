@@ -36,6 +36,15 @@ def test_summary_from_lines_without_a_summary_is_zeroed():
     assert summary_from_lines(iter(["{}"])) == ScrapeSummary()
 
 
+def test_summary_from_lines_skips_json_arrays():
+    """Scrapy/stdlib JSON logs can emit a list line; that must not crash the orchestrator."""
+    lines = [
+        '["downloader/response_status_count/200", 136]',
+        '{"event": "run_summary", "records_found": 120, "records_scraped": 120, "failed": 0}',
+    ]
+    assert summary_from_lines(iter(lines)) == ScrapeSummary(120, 120, 0)
+
+
 def test_partition_size_selects_the_matching_dagster_partitions():
     monthly = load_definitions(partition_size="monthly")
     weekly = load_definitions(partition_size="weekly")

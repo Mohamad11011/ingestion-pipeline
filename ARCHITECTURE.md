@@ -1,84 +1,36 @@
 # Architecture
 
 ```
-workplacerelations.ie --> Scrapy --> Mongo landing.metadata + MinIO landing/
-                                            |  (read only)
-                                            v
-                                     Transformation --> transformed.metadata + MinIO transformed/
+workplacerelations.ie → Scrapy → Mongo landing.metadata + MinIO landing/
+                                      |  (read only)
+                                      v
+                               Transformation → transformed.metadata + MinIO transformed/
 ```
 
-Dagster owns both steps as date-partitioned assets: `landing_documents` -> `transformed_documents`.
+Dagster assets: `landing_documents` → `transformed_documents` (transform depends on scrape).
 
 ## Date partition size
 
-Monthly (`PARTITION_SIZE`, also supports `weekly`). A month of one body is ~5 listing pages and
-tens of documents: small enough that a failed partition is cheap to re-run and its JSON summary is
-readable, large enough that partition overhead stays negligible at the 500-1000 document scale.
-Weekly is available for dense back-fills where a month would be too coarse to retry.
+**Monthly** (`PARTITION_SIZE`; `weekly` is also supported). A month of one body is a handful of listing pages and tens of documents: cheap to retry, readable in the JSON summary, and low overhead at the 500–1000 document scale. Weekly is for dense back-fills.
 
-Partitions are half-open `[start, end)`; `end_date` is exclusive and `partition_date` is the
-partition start (`YYYY-MM-DD`, Europe/Dublin, date only). The site's own `from`/`to` filters are
-*inclusive* calendar days, so the spider sends `to = partition_end - 1 day`. Dagster's
-`MonthlyPartitionsDefinition` window is likewise half-open, so one asset partition is exactly one
-scraper partition.
+Partitions are half-open `[start, end)`. `end_date` is exclusive. `partition_date` is the partition start (`YYYY-MM-DD`, Europe/Dublin, date only). The site’s `from`/`to` are inclusive, so the spider sends `to = partition_end − 1 day`. Dagster’s monthly window is the same half-open interval, so one asset partition is one scraper partition.
 
 ## Retries and rate limiting
 
-`AUTOTHROTTLE_ENABLED` adapts the delay to observed latency, on top of `DOWNLOAD_DELAY` (1.0s,
-randomized) and `CONCURRENT_REQUESTS` (8, capped per domain). `RETRY_TIMES=3` covers
-408/429/500/502/503/504/522/524 with Scrapy's exponential backoff; `DOWNLOAD_TIMEOUT=30`. A
-custom middleware logs every 429/503 with its `Retry-After` so throttling is visible in the JSON
-logs while AutoThrottle and RetryMiddleware do the waiting. An identifying `User-Agent` is sent.
-`ROBOTS.TXT`: `/en/search/` is allowed but `/en/Cases/` — where the decisions the test asks for
-live — is disallowed, so `ROBOTSTXT_OBEY=False` is deliberate and compensated with polite rates;
-the disallowed bulk import trees are never touched. Errors are per record: an errback logs
-`url`, `error_code`, `reason` and the run continues, so `records_found == records_scraped + failed`.
+`CONCURRENT_REQUESTS=8` (per domain), `DOWNLOAD_DELAY=1.0s` (randomized), `AUTOTHROTTLE_ENABLED`, `DOWNLOAD_TIMEOUT=30`, identifying `User-Agent`. `RETRY_TIMES=3` with exponential backoff on 408/429/500/502/503/504/522/524. A middleware logs 429/503 and `Retry-After`; AutoThrottle and RetryMiddleware wait. `/en/Cases/` is disallowed by `robots.txt` but is the path the test requires, so `ROBOTSTXT_OBEY=False` with polite rates; bulk-import trees are never requested. Failures are per record: errback logs `url`, `error_code`, `reason` and the run continues (`records_found == records_scraped + failed`).
 
 ## Deduplication
 
-Identity is `body + identifier`, enforced by a unique Mongo index (`uniq_body_identifier`) on both
-collections and used as the upsert filter. Before fetching, the spider loads the stored record and
-replays its `ETag`/`Last-Modified` as conditional headers; a `304` skips the download entirely.
-Otherwise the bytes are hashed (SHA-256 of exactly what is stored) and compared to `file_hash`:
-equal means no object put, different means a new landing object plus a metadata upsert.
+Identity is `body + identifier` (unique index `uniq_body_identifier` on both collections; upsert filter). Before fetch, stored `ETag` / `Last-Modified` are sent as conditional headers; `304` skips the download. After download, SHA-256 of the stored bytes is compared to `file_hash`: equal → no put; different → put landing object and upsert metadata.
 
-Three source facts shape this. (1) Decision pages send **no `ETag` and no `Last-Modified`**, so
-the conditional-GET path is implemented and unit-tested but never fires here — the hash comparison
-is what actually prevents re-puts. `Content-Length` disagrees with the real body by one byte and is
-deliberately not used as a validator. (2) Every page carries a volatile
-`<!-- Elapsed time: ... -->` render comment. (3) Pages also carry
-`<!-- cached or not being index.aspx page -->`, present or absent depending on the server's own
-cache state, so it flips between runs minutes apart. Both comments are normalized out **before**
-storing and hashing, so `file_hash` stays the hash of the stored bytes. Without either, a re-run
-rewrites nearly every object. This is HTML-only and the sole content change the landing zone makes.
+This source sends **no ETag/Last-Modified**, so the hash is the real guard (`Content-Length` is off by one and unused). Two volatile HTML comments (`Elapsed time`, cache-state) are normalized **before** store/hash so a re-run does not rewrite every page. **Transformation never writes landing** (`get` + `upsert_transformed` only). The scraper upserts landing when source bytes change — that is ingestion, not transform.
 
-The source also publishes distinct documents under a repeated reference: `RPD241`
-(`/2024/february/` and `/2024/july/`) and `ADJ-00044064` (`/2024/february/` and `/2024/january/`)
-are different decisions with the same `body + identifier`. Under the locked identity contract the
-second upserts over the first, so 616 listing hits yield 614 landing records; `records_found ==
-records_scraped + failed` still holds because those count listing hits and successful stores, not
-distinct identities. Making identity `body + identifier + document_url` would keep both, at the
-cost of the test's `identifier.ext` transformed-key rule — a contract change, not a bug fix.
-
-**Transformation never writes landing.** It only calls `storage.get(landing_bucket, ...)` and
-`upsert_transformed`; there is no landing write path in `transformer.py`. The scraper upserts
-landing objects when a source file changes — that is ingestion idempotency, not transformation.
-
-Two source limitations, documented rather than worked around: transformed keys are
-`identifier.ext` as the test requires, so two bodies sharing an identifier would collide there
-(landing keys are `{body}/{identifier}{ext}` and stay unique); and every listing hit observed so
-far resolves to an HTML decision page, so the PDF/DOC/DOCX branch is unit-tested but not yet
-exercised live.
+Landing keys `{body}/{identifier}{ext}` stay unique. Transformed keys are `identifier.ext` as required, so two bodies sharing an identifier would collide there. The source also repeats two identifiers (`RPD241`, `ADJ-00044064`) on different URLs; identity collapses them (616 listings → 614 records). PDF/DOC/DOCX copy-through is implemented; this site served HTML decision pages in the live range.
 
 ## Scaling to 50+ sources
 
-The source-specific code is already isolated: `scraping/{bodies,listing}.py` parse WRC markup, the
-spider composes requests, and everything downstream — partitioning, hashing, identity, storage
-ports, ingestion, transformation, logging — is source-agnostic and works from a common metadata
-schema (`models/metadata.py`). Scaling means adding a source registry (base URL, selectors,
-partition size, rate limits) and one adapter per source behind the existing `parse_*` contract,
-then making `body` a `(source, body)` pair in the identity index. Dagster grows a partition
-dimension: `MultiPartitionsDefinition(date x source)`, so 50 sources fan out as independent,
-individually retryable partitions over the same assets and the same buckets/collections. Storage
-and Mongo already stream per record (batched cursors, no full-collection loads), so the limits are
-politeness per host and worker count, not the pipeline.
+```
+Source config → generic framework → adapter A/B/C → common metadata schema → shared storage
+```
+
+WRC markup lives in `scraping/{bodies,listing}.py`. Partitioning, hashing, identity, storage ports, ingest, transform, and logging are source-agnostic (`models/metadata.py`). Next: a source registry (URL, selectors, rates) and one adapter each; identity becomes `(source, body, identifier)`. Dagster: `MultiPartitionsDefinition(date × source)` over the same assets and buckets. Mongo/S3 already stream per record, so the limit is politeness per host, not memory.

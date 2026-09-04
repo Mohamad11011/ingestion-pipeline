@@ -78,11 +78,14 @@ class LandingIngestor:
         payload = normalize_payload(payload, document_type)
         file_hash = sha256_bytes(payload)
         file_path = landing_key(record["body"], record["identifier"], document_type)
+        # Re-read at write time. The spider's download-time snapshot is stale when two
+        # listings share body+identifier (ADJ-00044064 / RPD241) and the other URL already wrote.
+        current = self._repository.find_landing(record["body"], record["identifier"]) or existing
 
         unchanged = (
-            existing is not None
-            and existing.get("file_hash") == file_hash
-            and existing.get("file_path") == file_path
+            current is not None
+            and current.get("file_hash") == file_hash
+            and current.get("file_path") == file_path
         )
         if not unchanged:
             self._storage.put(self._bucket, file_path, payload, _CONTENT_TYPES[document_type])

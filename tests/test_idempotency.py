@@ -330,3 +330,69 @@ def test_render_telemetry_does_not_look_like_a_change(
     assert second.file_hash == first.file_hash
     assert second.object_written is False
     assert len(_storage(ingestor).puts) == 1
+
+
+def test_stale_existing_snapshot_does_not_desync_storage_and_metadata(
+    ingestor: LandingIngestor,
+) -> None:
+    """Two URLs share body+identifier (ADJ-00044064). A spider snapshot taken before
+    the other URL wrote must not skip the object put while still upserting metadata."""
+    record = {
+        "identifier": "ADJ-00044064",
+        "title": "ADJ-00044064",
+        "description": "Parties",
+        "date": "2024-02-15",
+        "document_url": "https://example.test/2024/february/adj-00044064.html",
+        "source_url": "https://example.test/2024/february/adj-00044064.html",
+        "partition_date": "2024-02-01",
+        "body": "Workplace Relations Commission",
+    }
+    payload_february = b"<html>february edition</html>"
+    payload_january = b"<html>january edition</html>"
+    first = ingestor.ingest(record, payload_february, "text/html")
+    stale_snapshot = dict(
+        _repository(ingestor).find_landing(record["body"], record["identifier"])
+    )
+
+    ingestor.ingest(record, payload_january, "text/html", stale_snapshot)
+    third = ingestor.ingest(record, payload_february, "text/html", stale_snapshot)
+
+    stored = _repository(ingestor).find_landing(record["body"], record["identifier"])
+    payload = _storage(ingestor).get(BUCKET, stored["file_path"])
+    assert sha256_bytes(payload) == stored["file_hash"]
+    assert payload == payload_february
+    assert third.object_written is True
+    assert third.file_hash == first.file_hash
+
+
+def test_stale_existing_snapshot_does_not_desync_storage_and_metadata(
+    ingestor: LandingIngestor,
+) -> None:
+    """Two URLs share body+identifier (ADJ-00044064). A spider snapshot taken before
+    the other URL wrote must not skip the object put while still upserting metadata."""
+    record = {
+        "identifier": "ADJ-00044064",
+        "title": "ADJ-00044064",
+        "description": "Parties",
+        "date": "2024-02-15",
+        "document_url": "https://example.test/2024/february/adj-00044064.html",
+        "source_url": "https://example.test/2024/february/adj-00044064.html",
+        "partition_date": "2024-02-01",
+        "body": "Workplace Relations Commission",
+    }
+    payload_february = b"<html>february edition</html>"
+    payload_january = b"<html>january edition</html>"
+    first = ingestor.ingest(record, payload_february, "text/html")
+    stale_snapshot = dict(
+        _repository(ingestor).find_landing(record["body"], record["identifier"])
+    )
+
+    ingestor.ingest(record, payload_january, "text/html", stale_snapshot)
+    third = ingestor.ingest(record, payload_february, "text/html", stale_snapshot)
+
+    stored = _repository(ingestor).find_landing(record["body"], record["identifier"])
+    payload = _storage(ingestor).get(BUCKET, stored["file_path"])
+    assert sha256_bytes(payload) == stored["file_hash"]
+    assert payload == payload_february
+    assert third.object_written is True
+    assert third.file_hash == first.file_hash
